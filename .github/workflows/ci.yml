@@ -92,6 +92,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Normalize GHCR image name
+        id: ghcr-image
+        run: |
+          image_name="$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/$image_name" >> "$GITHUB_OUTPUT"
+
       - name: Build and push to registries
         uses: docker/build-push-action@v7
         with:
@@ -100,7 +106,7 @@ jobs:
           cache-from: type=gha,scope=flask-app
           cache-to: type=gha,mode=max,scope=flask-app
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ${{ steps.ghcr-image.outputs.image }}:latest
+            ${{ steps.ghcr-image.outputs.image }}:${{ github.sha }}
             ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
             ${{ secrets.DOCKER_USERNAME }}/flask-app:${{ github.sha }}
