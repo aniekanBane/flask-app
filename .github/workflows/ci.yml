@@ -28,7 +28,23 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run unit tests with pytest
+        id: pytest
         run: pytest
+
+      - name: Test failure email notification
+        if: failure() && steps.pytest.outcome == 'failure'
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          connection_url: ${{ secrets.EMAIL_CONNECTION }}
+          subject: "Flask App CI Pipeline - Test Failure"
+          to: ${{ secrets.RECIPIENT_EMAIL }}
+          from: GitHub Actions
+          body: |
+            The Flask App CI Pipeline has failed in ${{ github.repository }} during the test stage on commit ${{ github.sha }},  
+            branch ${{ github.ref }}. Please check the GitHub Actions logs for more details. 
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          priority: high
   
   docker-build:
     name: Docker build
