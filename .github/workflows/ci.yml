@@ -3,9 +3,14 @@ name: Flask App CI Pipeline
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
+  test:
+    name: Test
     runs-on: ubuntu-latest
 
     steps:
@@ -24,21 +29,78 @@ jobs:
 
       - name: Run unit tests with pytest
         run: pytest
+  
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+
+    env:
+      TEST_TAG: user/flask-app:test
+
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v6
       
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+      
+      - name: Build and export to Docker
+        uses: docker/build-push-action@v7
+        with:
+          load: true
+          tags: ${{ env.TEST_TAG }}
+          cache-from: type=gha,scope=flask-app
+          cache-to: type=gha,mode=max,scope=flask-app
+      
+      - name: Smoke Test
+        run: |
+          container_id="$(docker run --rm -d -p 5128:5128 ${{ env.TEST_TAG }})"
+          trap 'docker stop "$container_id" >/dev/null 2>&1 || true' EXIT
+          sleep 5
+          response="$(curl --fail --silent --show-error http://127.0.0.1:5128/)"
+          test "$response" = "Hello, World!"
+
+  push-registries:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Push to registries
+    runs-on: ubuntu-latest
+    needs: [ test, docker-build ]
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository code
+        uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-        
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push to Docker Hub
+      - name: Build and push to registries
         uses: docker/build-push-action@v7
         with:
           context: .
           push: true
+          cache-from: type=gha,scope=flask-app
+          cache-to: type=gha,mode=max,scope=flask-app
           tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
             ${{ secrets.DOCKER_USERNAME }}/flask-app:latest
             ${{ secrets.DOCKER_USERNAME }}/flask-app:${{ github.sha }}
